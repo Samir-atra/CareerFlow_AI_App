@@ -65,5 +65,16 @@ The app utilizes a "Waterfall" priority search engine to find the best roles for
 *   **Client-Side Processing**: Document text is processed in memory and sent directly to the Gemini API.
 *   **No Database**: No personal data is stored persistently on any server.
 
+## ☕ Support
+
+If you find this project helpful and want to support its development, you can make a donation below.
+
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=samiratra95@gmail.com&item_name=CareerFlow+AI+Donation&currency_code=USD)
+
+Alternatively, you can run the included python script to open the donation page:
+```bash
+python3 donate.py
+```
+
 ---
 *Built with ❤️ using Google Gemini.*
