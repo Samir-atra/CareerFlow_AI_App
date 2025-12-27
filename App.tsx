@@ -171,7 +171,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   
-                  <div className="relative w-full sm:w-28">
+                  <div className="relative w-full sm:w-36">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                       <Hash size={16} />
                     </div>
@@ -180,11 +180,19 @@ const App: React.FC = () => {
                       min="1"
                       max="20"
                       value={jobCount}
-                      onChange={(e) => setJobCount(parseInt(e.target.value))}
+                      onChange={(e) => {
+                        let val = parseInt(e.target.value);
+                        if (isNaN(val)) val = 1;
+                        if (val > 20) val = 20;
+                        if (val < 1) val = 1;
+                        setJobCount(val);
+                      }}
                       placeholder="Qty"
-                      className="w-full pl-9 pr-3 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-                      title="Number of jobs to return (1-20)"
+                      className="w-full pl-9 pr-16 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-left"
                     />
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                      <span className="text-xs text-slate-400 font-medium border-l border-slate-200 pl-2">Max 20</span>
+                    </div>
                   </div>
                 </div>
               </div>
