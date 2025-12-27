@@ -1,3 +1,4 @@
+
 export enum SkillType {
   TECHNICAL = 'Technical',
   SOFT = 'Soft',
@@ -34,6 +35,11 @@ export interface JobLink {
   uri: string;
 }
 
+export interface JobSearchResult {
+  text: string;
+  links: JobLink[];
+}
+
 export interface ApplicationData {
   personalInfo: {
     fullName: string;
@@ -48,6 +54,7 @@ export interface ApplicationData {
     relevantExperience: string;
     salaryExpectation: string;
   };
+  applyUrl?: string; // Direct link to the application form if found
 }
 
 export enum AnalysisStatus {

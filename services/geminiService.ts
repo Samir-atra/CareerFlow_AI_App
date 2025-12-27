@@ -118,52 +118,53 @@ export const analyzeDocuments = async (resume: InputData, coverLetter: InputData
   }
 };
 
+// Helper to extract root domain (e.g., 'microsoft.com' from 'apply.careers.microsoft.com')
+const getRootDomain = (url: string): string => {
+  try {
+    const hostname = new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
+    const parts = hostname.split('.');
+    // Simple heuristic: if > 2 parts, take last 2. 
+    // Works for microsoft.com, apple.com, google.com, x.ai (2 parts)
+    if (parts.length > 2) {
+      return parts.slice(-2).join('.');
+    }
+    return hostname;
+  } catch {
+    return url;
+  }
+};
+
 export const findRelevantJobs = async (keywords: string[], targetUrl: string, limit: number = 3): Promise<{ text: string, links: JobLink[] }> => {
   const ai = getClient();
   
-  // 1. Prepare URL data for filtering
-  let targetHost = '';
-  let fullPath = '';
+  const rootDomain = getRootDomain(targetUrl);
   
-  try {
-    const urlStr = targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`;
-    const urlObj = new URL(urlStr);
-    // Hostname for strict domain filtering (e.g., 'linkedin.com')
-    targetHost = urlObj.hostname.replace(/^www\./, ''); 
-    fullPath = urlStr;
-  } catch (e) {
-    console.warn("Could not parse target URL", e);
-    // Fallback: simple split
-    targetHost = targetUrl.replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, '');
-    fullPath = targetUrl;
-  }
-
-  // Use a richer set of keywords for context
-  const contextKeywords = keywords.slice(0, 8).join(', '); // Reduced count slightly to focus on most important
+  // Broaden keywords for search query - use OR to maximize recall
+  const searchKeywords = keywords.slice(0, 5).map(k => `"${k}"`).join(" OR ");
   
-  // Refined prompt to be more agentic and robust, specifically targeting LEAF pages
+  // Broad prompt strategy with Explicit Fallback
   const prompt = `
-    User Target URL (Collection Page): "${fullPath}"
-    Target Domain: "${targetHost}"
-    Candidate Skills: ${contextKeywords}
+    User Target Collection URL: "${targetUrl}"
+    Target Root Domain: "${rootDomain}"
+    Candidate Keywords: ${searchKeywords}
 
-    **OBJECTIVE**: Find exactly ${limit} distinct "Leaf Page" job postings.
-    
-    **DEFINITIONS**:
-    - **Collection Page**: A list of jobs, search results, or a generic careers landing page (e.g., "greenhouse.io/airbnb", "linkedin.com/jobs").
-    - **Leaf Page**: A specific URL for a SINGLE job role where the candidate can read the description and apply (e.g., "greenhouse.io/airbnb/jobs/4821234", "linkedin.com/jobs/view/99999").
+    **OBJECTIVE**: Find exactly ${limit} distinct "Leaf Page" job postings for the company "${rootDomain}".
 
-    **INSTRUCTIONS**:
-    1.  **Search Strategy**: Use Google Search. Look for URLs on the Target Domain that follow "leaf" patterns (containing IDs, "view", "position", "jobs/").
-    2.  **Query Construction**: 
-        - Use 'site:${targetHost}' AND ("job" OR "career") AND ("${keywords[0]}" OR "${keywords[1]}").
-        - Exclude lists: -intitle:"Careers at" -intitle:"Jobs at" -inurl:search -inurl:categories.
-    3.  **Validation**:
-        - The title of the page must sound like a specific role (e.g., "Senior React Engineer") NOT a generic page (e.g., "Engineering Careers").
-        - The URL must be distinct from the User Target URL.
+    **STRATEGY (Priority Order)**:
+    1. **Primary**: Search specifically for job pages on "site:${rootDomain}" or common ATS platforms (Greenhouse, Lever, etc).
+    2. **Fallback**: If finding sufficient specific pages on the official site is difficult, expand the search to find **ANY** valid job posting for "${rootDomain}" on reputable third-party sites (LinkedIn, Indeed, etc.).
+    3. **Guarantee**: You must attempt to return ${limit} results.
+
+    **LEAF PAGE DEFINITION**:
+    - A page describing a single specific role.
+    - URL often contains: /job/, /careers/details/, /position/, /req/, or a numeric ID.
+    - Examples: 
+      - "jobs.apple.com/en-us/details/200..." (Leaf) vs "jobs.apple.com/en-us/search" (Collection)
+      - "google.com/about/careers/.../results/123" (Leaf) vs ".../results" (Collection)
+      - "boards.greenhouse.io/xai/jobs/123" (Leaf)
 
     **OUTPUT**:
-    - Return the Google Search grounding metadata for these specific job pages.
+    - Return Google Search grounding metadata for these leaf pages.
   `;
 
   try {
@@ -190,73 +191,103 @@ export const findRelevantJobs = async (keywords: string[], targetUrl: string, li
       }
     });
 
-    // Define patterns for invalid or "not found" pages
-    // Expanded to catch more "Collection" type pages that slip through
+    // Flexible filtering logic
     const badTitlePatterns = [
       /not found/i,
       /error/i,
       /404/i,
       /job closed/i,
       /closed job/i,
-      /expired/i,
       /no longer available/i,
-      /job filled/i,
-      /access denied/i,
       /login/i,
       /sign in/i,
-      /privacy policy/i,
-      /terms of service/i,
-      /search results/i,
-      /^jobs at/i, // Starts with "Jobs at" -> usually a landing page
-      /^careers at/i, // Starts with "Careers at" -> usually a landing page
-      /view all jobs/i,
-      /open positions/i,
-      /browse jobs/i
+      /search results/i, // "Search Results" is almost always a collection
     ];
 
-    // Helper to normalize URLs for comparison
+    const atsDomains = [
+      'greenhouse.io', 'lever.co', 'workday', 'ashby', 'smartrecruiters', 
+      'icims', 'jobvite', 'taleo', 'bamboohr', 'recruitee', 'workable'
+    ];
+
+    // Helper to normalize URLs
     const normalize = (u: string) => u.toLowerCase().replace(/\/$/, '').replace(/^https?:\/\/(www\.)?/, '');
-    const normalizedFullPath = normalize(fullPath);
+    const normalizedTarget = normalize(targetUrl);
 
-    // 3. Filter: Keep links that belong to the target host and pass title validation
-    const filteredLinks = links.filter(link => {
-       // A. Hostname Validation
-       let hostMatch = false;
-       if (!targetHost) {
-         hostMatch = true;
-       } else {
-         try {
-           const linkUrl = new URL(link.uri);
-           const linkHost = linkUrl.hostname.replace(/^www\./, '');
-           hostMatch = linkHost.includes(targetHost) || targetHost.includes(linkHost);
-         } catch {
-           hostMatch = false;
-         }
+    // Filter AND Score links
+    // We do not discard non-domain links immediately anymore. We prioritize.
+    const scoredLinks = links.map(link => {
+       const linkUrlStr = link.uri;
+       let linkUrl: URL;
+       try {
+         linkUrl = new URL(linkUrlStr);
+       } catch {
+         return { link, score: -1, valid: false };
        }
-       if (!hostMatch) return false;
 
-       // B. Title Validation
-       if (badTitlePatterns.some(pattern => pattern.test(link.title))) {
-         return false;
-       }
+       const title = link.title.trim();
        
-       // C. Self-Reference / Collection Page Validation
-       const normalizedLink = normalize(link.uri);
-       if (normalizedLink === normalizedFullPath) return false;
-       
-       // Heuristic: Leaf pages usually have longer paths than the collection root (if under same domain)
-       // This prevents returning the board root again.
-       if (normalizedLink.startsWith(normalizedFullPath) && normalizedLink.length <= normalizedFullPath.length + 1) {
-          return false;
+       // 1. Basic Validity Checks
+       // Generic bad patterns in title
+       if (badTitlePatterns.some(pattern => pattern.test(title))) {
+          // If it's explicitly "Search Results", skip it.
+          // But allow "Jobs at X" if we are in fallback mode (handled by score)
+          if (title.toLowerCase().includes('search results')) return { link, score: -1, valid: false };
        }
 
-       return true;
+       // Collection Page Loop Prevention
+       const normalizedLink = normalize(linkUrlStr);
+       if (normalizedLink === normalizedTarget) return { link, score: -1, valid: false };
+       if (normalizedLink.startsWith(normalizedTarget) && normalizedLink.length < normalizedTarget.length + 5) {
+         return { link, score: -1, valid: false };
+       }
+
+       // 2. Scoring
+       let score = 0;
+       const linkHost = linkUrl.hostname;
+       const isRootMatch = linkHost.includes(rootDomain) || rootDomain.includes(linkHost);
+       const isAts = atsDomains.some(d => linkHost.includes(d));
+       const titleMentionsCompany = title.toLowerCase().includes(rootDomain.split('.')[0]);
+
+       // Tier 1: Official Domain
+       if (isRootMatch) {
+         score += 100;
+       } 
+       // Tier 2: Known ATS
+       else if (isAts) {
+         score += 80;
+       } 
+       // Tier 3: Third Party but mentions company
+       else if (titleMentionsCompany) {
+         score += 50;
+       }
+       // Tier 4: Others (General fallback)
+       else {
+         score += 10;
+       }
+
+       // Specific penalty for "Jobs at" if it's not on the main domain (likely a directory)
+       if (/^Jobs at /i.test(title) && !isRootMatch) {
+         score -= 20;
+       }
+
+       return { link, score, valid: true };
     });
 
-    // Deduplicate
-    const uniqueLinks = Array.from(new Map(filteredLinks.map(item => [item.uri, item])).values());
+    // Filter invalid, Sort by Score, Deduplicate
+    const validLinks = scoredLinks.filter(item => item.valid).sort((a, b) => b.score - a.score);
+    
+    const uniqueLinks: JobLink[] = [];
+    const seen = new Set<string>();
+    
+    for (const item of validLinks) {
+      if (!seen.has(item.link.uri)) {
+        seen.add(item.link.uri);
+        uniqueLinks.push(item.link);
+      }
+      if (uniqueLinks.length >= limit) break;
+    }
 
-    return { text, links: uniqueLinks.slice(0, limit) };
+    return { text, links: uniqueLinks };
   } catch (error) {
     console.error("Job Search Error:", error);
     throw error;
@@ -286,7 +317,8 @@ const applicationSchema: Schema = {
         salaryExpectation: { type: Type.STRING, description: "A professional salary expectation statement." },
       },
       required: ["coverLetter", "whyThisRole", "relevantExperience", "salaryExpectation"]
-    }
+    },
+    applyUrl: { type: Type.STRING, description: "The direct URL to the application form page, if distinct from the job description page." }
   },
   required: ["personalInfo", "responses"]
 };
@@ -302,6 +334,7 @@ export const generateApplicationData = async (resume: InputData, jobTitle: strin
     Target URL: ${jobUri}
     
     1. **Research**: Use Google Search to analyze the specific job description at the provided URL. Understand the key requirements, company culture, and role responsibilities.
+       - IMPORTANT: Also try to identify if there is a distinct "Apply" URL (a page with a form) that is different from the description page. If found, include it in the 'applyUrl' field.
     2. **Analyze Candidate**: Review the Candidate's Resume provided below.
     3. **Extract Info**: Get Candidate's Personal Info.
     4. **Draft Content**: 

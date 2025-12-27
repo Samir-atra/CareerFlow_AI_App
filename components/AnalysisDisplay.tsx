@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnalysisResult, Skill, SkillType, InputData } from '../types';
+import { AnalysisResult, Skill, SkillType, InputData, JobSearchResult } from '../types';
 import { 
   BarChart, 
   Bar, 
@@ -16,11 +16,12 @@ import { JobSearch } from './JobSearch';
 interface AnalysisDisplayProps {
   result: AnalysisResult;
   resume: InputData;
+  jobResults: JobSearchResult | null;
 }
 
 const COLORS = ['#6366f1', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6'];
 
-export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume }) => {
+export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume, jobResults }) => {
   const technicalSkills = result.topSkills.filter(s => s.type === SkillType.TECHNICAL).sort((a, b) => b.score - a.score).slice(0, 8);
   const softSkills = result.topSkills.filter(s => s.type === SkillType.SOFT).sort((a, b) => b.score - a.score).slice(0, 6);
 
@@ -140,10 +141,12 @@ export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume
           </div>
       </div>
 
-      {/* Job Search Section */}
-      <div className="pt-4 border-t border-slate-200">
-        <JobSearch keywords={result.keywords} resume={resume} />
-      </div>
+      {/* Job Search Section Results (Only shown if results exist) */}
+      {jobResults && (
+        <div className="pt-4 border-t border-slate-200">
+          <JobSearch results={jobResults} resume={resume} />
+        </div>
+      )}
     </div>
   );
 };
