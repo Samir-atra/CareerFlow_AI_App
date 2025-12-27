@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ExternalLink, Briefcase, Loader2, PenTool, AlertCircle, Building2 } from 'lucide-react';
+import { ExternalLink, Briefcase, Loader2, Sparkles, AlertCircle, Building2 } from 'lucide-react';
 import { generateApplicationData } from '../services/geminiService';
 import { JobLink, InputData, ApplicationData, JobSearchResult } from '../types';
 import { ApplicationModal } from './ApplicationModal';
@@ -10,13 +10,14 @@ interface JobSearchDisplayProps {
 }
 
 export const JobSearch: React.FC<JobSearchDisplayProps> = ({ results, resume }) => {
-  // State for Auto-Fill feature
+  // State for Draft Generation feature
   const [generatingForUri, setGeneratingForUri] = useState<string | null>(null);
   const [applicationData, setApplicationData] = useState<ApplicationData | null>(null);
   const [selectedJobTitle, setSelectedJobTitle] = useState<string>('');
+  const [selectedJobUri, setSelectedJobUri] = useState<string>('');
   const [modalError, setModalError] = useState<string | null>(null);
 
-  const handleAutoFill = async (link: JobLink) => {
+  const handleGenerateDraft = async (link: JobLink) => {
     if (!resume.data) {
        setModalError("Resume data is missing. Please upload a resume first.");
        return;
@@ -25,6 +26,7 @@ export const JobSearch: React.FC<JobSearchDisplayProps> = ({ results, resume }) 
     setGeneratingForUri(link.uri);
     setModalError(null);
     setSelectedJobTitle(link.title);
+    setSelectedJobUri(link.uri);
 
     try {
       const data = await generateApplicationData(resume, link.title, link.uri);
@@ -124,21 +126,21 @@ export const JobSearch: React.FC<JobSearchDisplayProps> = ({ results, resume }) 
                       <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleAutoFill(link);
+                            handleGenerateDraft(link);
                           }}
                           disabled={generatingForUri === link.uri}
                           className="shrink-0 flex items-center gap-2 px-3 py-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-wait text-sm font-medium"
-                          title="Auto-Fill Application"
+                          title="Generate Application Content"
                         >
                           {generatingForUri === link.uri ? (
                             <>
                               <Loader2 size={16} className="animate-spin" />
-                              <span className="hidden sm:inline">Working...</span>
+                              <span className="hidden sm:inline">Writing...</span>
                             </>
                           ) : (
                             <>
-                              <PenTool size={16} />
-                              <span className="hidden sm:inline">Auto-Fill</span>
+                              <Sparkles size={16} />
+                              <span className="hidden sm:inline">Draft Responses</span>
                             </>
                           )}
                         </button>
@@ -160,6 +162,7 @@ export const JobSearch: React.FC<JobSearchDisplayProps> = ({ results, resume }) 
         <ApplicationModal 
           data={applicationData} 
           jobTitle={selectedJobTitle}
+          jobUrl={selectedJobUri}
           onClose={() => setApplicationData(null)} 
         />
       )}

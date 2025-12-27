@@ -10,7 +10,7 @@ import {
   ResponsiveContainer, 
   Cell 
 } from 'recharts';
-import { BadgeCheck, Lightbulb, List, FileText, CheckCircle2 } from 'lucide-react';
+import { BadgeCheck, Lightbulb, List, FileText, CheckCircle2, Search, ExternalLink } from 'lucide-react';
 import { JobSearch } from './JobSearch';
 
 interface AnalysisDisplayProps {
@@ -24,6 +24,39 @@ const COLORS = ['#6366f1', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6'];
 export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume, jobResults }) => {
   const technicalSkills = result.topSkills.filter(s => s.type === SkillType.TECHNICAL).sort((a, b) => b.score - a.score).slice(0, 8);
   const softSkills = result.topSkills.filter(s => s.type === SkillType.SOFT).sort((a, b) => b.score - a.score).slice(0, 6);
+
+  // Generate Smart Search Links based on extracted keywords
+  const generateSearchLinks = () => {
+    // Take top 3 keywords + "Job"
+    const query = result.keywords.slice(0, 3).join(' ');
+    const encodedQuery = encodeURIComponent(query);
+    
+    return [
+      {
+        name: 'LinkedIn Jobs',
+        url: `https://www.linkedin.com/jobs/search/?keywords=${encodedQuery}`,
+        color: 'bg-blue-600',
+        textColor: 'text-blue-600',
+        bgColor: 'bg-blue-50'
+      },
+      {
+        name: 'Google Jobs',
+        url: `https://www.google.com/search?q=${encodedQuery}+jobs&ibp=htl;jobs`,
+        color: 'bg-red-500',
+        textColor: 'text-red-600',
+        bgColor: 'bg-red-50'
+      },
+      {
+        name: 'Indeed',
+        url: `https://www.indeed.com/jobs?q=${encodedQuery}`,
+        color: 'bg-indigo-600',
+        textColor: 'text-indigo-600',
+        bgColor: 'bg-indigo-50'
+      }
+    ];
+  };
+
+  const smartLinks = generateSearchLinks();
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -109,18 +142,41 @@ export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Extracted Keywords */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-            <div className="flex items-center gap-2 text-slate-800 mb-4">
-              <List size={20} className="text-slate-400" />
-              <h3 className="font-bold text-lg">Extracted Keywords</h3>
+          {/* Extracted Keywords & Smart Search */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col gap-6">
+            <div>
+              <div className="flex items-center gap-2 text-slate-800 mb-4">
+                <List size={20} className="text-slate-400" />
+                <h3 className="font-bold text-lg">Optimized Keywords</h3>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {result.keywords.map((kw, idx) => (
+                  <span key={idx} className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded text-xs font-medium hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-default">
+                    #{kw}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {result.keywords.map((kw, idx) => (
-                <span key={idx} className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded text-xs font-medium hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-default">
-                  #{kw}
-                </span>
-              ))}
+
+            <div className="pt-4 border-t border-slate-100">
+               <div className="flex items-center gap-2 text-slate-800 mb-4">
+                <Search size={18} className="text-indigo-500" />
+                <h3 className="font-bold text-md">Instant Job Search</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {smartLinks.map((link) => (
+                  <a
+                    key={link.name}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm transition-all hover:shadow-md ${link.bgColor} ${link.textColor}`}
+                  >
+                    {link.name}
+                    <ExternalLink size={14} />
+                  </a>
+                ))}
+              </div>
             </div>
           </div>
 

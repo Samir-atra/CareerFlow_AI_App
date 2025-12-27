@@ -11,7 +11,7 @@ interface FileUploadProps {
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({ label, data, onChange, placeholder }) => {
-  const [activeTab, setActiveTab] = useState<'paste' | 'upload'>('paste');
+  const [activeTab, setActiveTab] = useState<'paste' | 'upload'>('upload');
   const [isProcessing, setIsProcessing] = useState(false);
   
   // Helper to determine if we are currently holding a binary file (like PDF)
@@ -41,9 +41,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ label, data, onChange, p
             fileName: file.name
           });
           setIsProcessing(false);
-          // Stay on upload tab or switch? For PDF, upload tab visual feedback is nice, 
-          // but we can also show a "File Loaded" view in the paste area.
-          // Let's rely on the conditional rendering below.
+          // Stay on upload tab for PDFs to show the success badge in the upload area
         };
         reader.readAsDataURL(file);
       } 
@@ -82,20 +80,20 @@ export const FileUpload: React.FC<FileUploadProps> = ({ label, data, onChange, p
         <label className="text-sm font-semibold text-slate-700 uppercase tracking-wider">{label}</label>
         <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
           <button
-            onClick={() => setActiveTab('paste')}
-            className={`px-3 py-1 rounded-md transition-colors ${
-              activeTab === 'paste' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Editor
-          </button>
-          <button
             onClick={() => setActiveTab('upload')}
             className={`px-3 py-1 rounded-md transition-colors ${
               activeTab === 'upload' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
             }`}
           >
             Upload
+          </button>
+          <button
+            onClick={() => setActiveTab('paste')}
+            className={`px-3 py-1 rounded-md transition-colors ${
+              activeTab === 'paste' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Editor
           </button>
         </div>
       </div>

@@ -14,7 +14,11 @@
     "recharts": "^3.6.0",
     "lucide-react": "^0.562.0",
     "react-dom": "^19.2.3",
-    "mammoth": "1.8.0"
+    "mammoth": "1.8.0",
+    "express": "^5.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "browser-use-sdk": "^2.0.12"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

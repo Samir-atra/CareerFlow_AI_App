@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { AnalysisDisplay } from './components/AnalysisDisplay';
 import { analyzeDocuments, findRelevantJobs } from './services/geminiService';
-import { AnalysisResult, AnalysisStatus, InputData, JobSearchResult } from './types';
+import { AnalysisResult, AnalysisStatus, InputData, JobSearchResult, JobLink } from './types';
 import { Sparkles, ArrowRight, RefreshCw, AlertCircle, Search, Hash, Briefcase } from 'lucide-react';
+import { PRESET_JOB_BOARDS } from './constants';
 
 const App: React.FC = () => {
   // Document Inputs
@@ -12,7 +13,7 @@ const App: React.FC = () => {
   
   // Job Search Inputs
   const [targetUrl, setTargetUrl] = useState('');
-  const [jobCount, setJobCount] = useState(3);
+  const [jobCount, setJobCount] = useState(5); // Default higher for better initial experience
 
   // State
   const [status, setStatus] = useState<AnalysisStatus>(AnalysisStatus.IDLE);
@@ -35,30 +36,76 @@ const App: React.FC = () => {
       // 1. Start Analysis
       const analysisPromise = analyzeDocuments(resume, coverLetter);
       
-      let searchPromise: Promise<JobSearchResult> | Promise<null> = Promise.resolve(null);
-
-      // 2. Start Job Search (if URL provided)
-      // We need to wait for keywords from analysis? 
-      // Actually, strictly speaking, we can run them in parallel if we had keywords, 
-      // but we need the analysis to get the best keywords.
-      // However, to keep it fast, we can use the raw text or wait. 
-      // Let's Wait for analysis first to get the *best* keywords for the search.
-      
+      // Wait for analysis to get the best keywords
       const analysis = await analysisPromise;
       setAnalysisResult(analysis);
 
-      // 3. Run Search if URL is present using the extracted keywords
+      // 2. Prepare Search Targets (Prioritized List)
+      const tasks: { type: 'USER' | 'PRESET' | 'OPEN', url: string | null, priority: number }[] = [];
+
+      // High Priority: User provided URL
       if (targetUrl.trim()) {
         let url = targetUrl.trim();
         if (!url.startsWith('http')) {
           url = 'https://' + url;
         }
-        // Use the extracted keywords from the analysis
-        const searchRes = await findRelevantJobs(analysis.keywords, url, jobCount);
-        setJobResults(searchRes);
+        tasks.push({ type: 'USER', url, priority: 1 });
       }
 
+      // Medium Priority: Presets
+      PRESET_JOB_BOARDS.forEach(url => {
+        // Avoid duplicate scanning if user entered a preset URL
+        if (tasks.find(t => t.url === url)) return;
+        tasks.push({ type: 'PRESET', url, priority: 2 });
+      });
+
+      // Low Priority: Open Search (General web search for keywords)
+      tasks.push({ type: 'OPEN', url: null, priority: 3 });
+
+      // 3. Run Search in Parallel
+      // We search all sources to ensure we can fill the requested quota with the best possible mix,
+      // respecting the priority order in the final sort.
+      const searchPromises = tasks.map(task => 
+        findRelevantJobs(analysis.keywords, task.url, jobCount)
+          .then(res => ({ ...res, priority: task.priority }))
+          .catch(err => {
+            console.warn(`Search failed for ${task.url || 'Open Search'}:`, err);
+            return { text: '', links: [] as JobLink[], priority: task.priority };
+          })
+      );
+
+      const results = await Promise.all(searchPromises);
+
+      // 4. Aggregate & Prioritize Results
+      // Flatten the results and tag with priority
+      const allLinks = results.flatMap(r => r.links.map(link => ({ ...link, priority: r.priority })));
+      
+      // Sort: Priority ascending (1 -> 2 -> 3)
+      // This ensures User URL links come first, then Presets, then Open Search.
+      allLinks.sort((a, b) => a.priority - b.priority);
+      
+      // Deduplicate by URI
+      const uniqueLinks: JobLink[] = [];
+      const seen = new Set<string>();
+      
+      for (const item of allLinks) {
+        if (!seen.has(item.uri)) {
+          seen.add(item.uri);
+          uniqueLinks.push({ title: item.title, uri: item.uri });
+        }
+      }
+
+      // Apply the total limit (waterfall fill)
+      const finalLinks = uniqueLinks.slice(0, jobCount);
+
+      const combinedResult: JobSearchResult = {
+        text: "Aggregated Search Results",
+        links: finalLinks
+      };
+
+      setJobResults(combinedResult);
       setStatus(AnalysisStatus.SUCCESS);
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || "An unexpected error occurred during processing.");
@@ -74,7 +121,7 @@ const App: React.FC = () => {
     setResume({ mimeType: 'text/plain', data: '' });
     setCoverLetter({ mimeType: 'text/plain', data: '' });
     setTargetUrl('');
-    setJobCount(3);
+    setJobCount(5);
   };
 
   return (
@@ -114,7 +161,7 @@ const App: React.FC = () => {
               Your AI Career Copilot
             </h1>
             <p className="text-lg text-slate-600">
-              Provide your documents and a target job board. We'll analyze your profile, find specific matching roles, and prepare your applications instantly.
+              Provide your documents. We'll analyze your profile and find matching roles at <b>Google, Microsoft, Apple</b>, and any other target you specify.
             </p>
           </div>
         )}
@@ -149,13 +196,17 @@ const App: React.FC = () => {
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
               <div className="flex items-center gap-2 mb-6">
                 <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold">2</div>
-                <h3 className="text-lg font-bold text-slate-800">Job Target (Optional)</h3>
+                <h3 className="text-lg font-bold text-slate-800">Job Target</h3>
               </div>
               
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4">
                 <p className="text-sm text-slate-600 mb-4 flex items-center gap-2">
                   <Briefcase size={16} />
-                  Paste a "Collection Page" URL (e.g., generic careers page). We will find specific "Leaf Page" job postings for you.
+                  <span>
+                    We automatically search <span className="font-semibold text-slate-700">Google, Microsoft, and Apple</span>.
+                    <br/>
+                    Optionally add another specific job board URL below.
+                  </span>
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <div className="relative flex-1">
@@ -166,7 +217,7 @@ const App: React.FC = () => {
                       type="text"
                       value={targetUrl}
                       onChange={(e) => setTargetUrl(e.target.value)}
-                      placeholder="e.g., boards.greenhouse.io/airbnb, linkedin.com/jobs/search"
+                      placeholder="e.g., jobs.netflix.com, boards.greenhouse.io/airbnb"
                       className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
                     />
                   </div>
@@ -191,7 +242,7 @@ const App: React.FC = () => {
                       className="w-full pl-9 pr-16 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-left"
                     />
                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                      <span className="text-xs text-slate-400 font-medium border-l border-slate-200 pl-2">Max 20</span>
+                      <span className="text-xs text-slate-400 font-medium border-l border-slate-200 pl-2">Total Jobs</span>
                     </div>
                   </div>
                 </div>
@@ -217,7 +268,7 @@ const App: React.FC = () => {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Processing...
+                    Searching Job Boards...
                   </>
                 ) : (
                   <>

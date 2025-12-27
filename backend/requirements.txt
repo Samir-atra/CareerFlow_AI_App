@@ -1,0 +1,3 @@
+# DEPRECATED
+# The backend agent logic has been migrated to the TypeScript server in the /server directory.
+# You can safely delete this file and the backend directory.

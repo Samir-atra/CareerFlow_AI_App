@@ -134,38 +134,63 @@ const getRootDomain = (url: string): string => {
   }
 };
 
-export const findRelevantJobs = async (keywords: string[], targetUrl: string, limit: number = 3): Promise<{ text: string, links: JobLink[] }> => {
+export const findRelevantJobs = async (
+  keywords: string[], 
+  targetUrl: string | null, 
+  limit: number = 3
+): Promise<{ text: string, links: JobLink[] }> => {
   const ai = getClient();
-  
-  const rootDomain = getRootDomain(targetUrl);
   
   // Broaden keywords for search query - use OR to maximize recall
   const searchKeywords = keywords.slice(0, 5).map(k => `"${k}"`).join(" OR ");
   
-  // Broad prompt strategy with Explicit Fallback
-  const prompt = `
-    User Target Collection URL: "${targetUrl}"
-    Target Root Domain: "${rootDomain}"
-    Candidate Keywords: ${searchKeywords}
+  let prompt = "";
+  let rootDomain = "";
 
-    **OBJECTIVE**: Find exactly ${limit} distinct "Leaf Page" job postings for the company "${rootDomain}".
+  if (targetUrl) {
+    rootDomain = getRootDomain(targetUrl);
+    // Targeted Search Prompt
+    prompt = `
+      User Target Collection URL: "${targetUrl}"
+      Target Root Domain: "${rootDomain}"
+      Candidate Keywords: ${searchKeywords}
 
-    **STRATEGY (Priority Order)**:
-    1. **Primary**: Search specifically for job pages on "site:${rootDomain}" or common ATS platforms (Greenhouse, Lever, etc).
-    2. **Fallback**: If finding sufficient specific pages on the official site is difficult, expand the search to find **ANY** valid job posting for "${rootDomain}" on reputable third-party sites (LinkedIn, Indeed, etc.).
-    3. **Guarantee**: You must attempt to return ${limit} results.
+      **OBJECTIVE**: Find exactly ${limit} distinct "Leaf Page" job postings for the company "${rootDomain}".
 
-    **LEAF PAGE DEFINITION**:
-    - A page describing a single specific role.
-    - URL often contains: /job/, /careers/details/, /position/, /req/, or a numeric ID.
-    - Examples: 
-      - "jobs.apple.com/en-us/details/200..." (Leaf) vs "jobs.apple.com/en-us/search" (Collection)
-      - "google.com/about/careers/.../results/123" (Leaf) vs ".../results" (Collection)
-      - "boards.greenhouse.io/xai/jobs/123" (Leaf)
+      **STRATEGY (Priority Order)**:
+      1. **Primary**: Search specifically for job pages on "site:${rootDomain}" or common ATS platforms (Greenhouse, Lever, etc).
+      2. **Fallback**: If finding sufficient specific pages on the official site is difficult, expand the search to find **ANY** valid job posting for "${rootDomain}" on reputable third-party sites (LinkedIn, Indeed, etc.).
+      3. **Guarantee**: You must attempt to return ${limit} results.
 
-    **OUTPUT**:
-    - Return Google Search grounding metadata for these leaf pages.
-  `;
+      **LEAF PAGE DEFINITION**:
+      - A page describing a single specific role.
+      - URL often contains: /job/, /careers/details/, /position/, /req/, or a numeric ID.
+      - Examples: 
+        - "jobs.apple.com/en-us/details/200..." (Leaf) vs "jobs.apple.com/en-us/search" (Collection)
+        - "google.com/about/careers/.../results/123" (Leaf) vs ".../results" (Collection)
+        - "boards.greenhouse.io/xai/jobs/123" (Leaf)
+
+      **OUTPUT**:
+      - Return Google Search grounding metadata for these leaf pages.
+    `;
+  } else {
+    // Open Search Prompt
+    prompt = `
+      Candidate Keywords: ${searchKeywords}
+
+      **OBJECTIVE**: Find ${limit} distinct "Leaf Page" job postings that match the candidate keywords.
+      
+      **STRATEGY**:
+      - Search broadly across major job boards (LinkedIn, Indeed, Glassdoor, etc.) and company career pages.
+      - Prioritize recent and relevant listings suitable for a professional candidate.
+      
+      **LEAF PAGE DEFINITION**:
+      - A page describing a single specific role.
+      
+      **OUTPUT**:
+      - Return Google Search grounding metadata for these leaf pages.
+    `;
+  }
 
   try {
     const response = await ai.models.generateContent({
@@ -211,10 +236,9 @@ export const findRelevantJobs = async (keywords: string[], targetUrl: string, li
 
     // Helper to normalize URLs
     const normalize = (u: string) => u.toLowerCase().replace(/\/$/, '').replace(/^https?:\/\/(www\.)?/, '');
-    const normalizedTarget = normalize(targetUrl);
+    const normalizedTarget = targetUrl ? normalize(targetUrl) : "";
 
     // Filter AND Score links
-    // We do not discard non-domain links immediately anymore. We prioritize.
     const scoredLinks = links.map(link => {
        const linkUrlStr = link.uri;
        let linkUrl: URL;
@@ -227,47 +251,42 @@ export const findRelevantJobs = async (keywords: string[], targetUrl: string, li
        const title = link.title.trim();
        
        // 1. Basic Validity Checks
-       // Generic bad patterns in title
        if (badTitlePatterns.some(pattern => pattern.test(title))) {
-          // If it's explicitly "Search Results", skip it.
-          // But allow "Jobs at X" if we are in fallback mode (handled by score)
           if (title.toLowerCase().includes('search results')) return { link, score: -1, valid: false };
        }
 
-       // Collection Page Loop Prevention
-       const normalizedLink = normalize(linkUrlStr);
-       if (normalizedLink === normalizedTarget) return { link, score: -1, valid: false };
-       if (normalizedLink.startsWith(normalizedTarget) && normalizedLink.length < normalizedTarget.length + 5) {
-         return { link, score: -1, valid: false };
+       // Collection Page Loop Prevention (Only if targetUrl is set)
+       if (targetUrl) {
+         const normalizedLink = normalize(linkUrlStr);
+         if (normalizedLink === normalizedTarget) return { link, score: -1, valid: false };
+         if (normalizedLink.startsWith(normalizedTarget) && normalizedLink.length < normalizedTarget.length + 5) {
+           return { link, score: -1, valid: false };
+         }
        }
 
        // 2. Scoring
        let score = 0;
        const linkHost = linkUrl.hostname;
-       const isRootMatch = linkHost.includes(rootDomain) || rootDomain.includes(linkHost);
-       const isAts = atsDomains.some(d => linkHost.includes(d));
-       const titleMentionsCompany = title.toLowerCase().includes(rootDomain.split('.')[0]);
 
-       // Tier 1: Official Domain
-       if (isRootMatch) {
-         score += 100;
-       } 
-       // Tier 2: Known ATS
-       else if (isAts) {
-         score += 80;
-       } 
-       // Tier 3: Third Party but mentions company
-       else if (titleMentionsCompany) {
-         score += 50;
-       }
-       // Tier 4: Others (General fallback)
-       else {
-         score += 10;
-       }
+       if (targetUrl) {
+         // Targeted Search Scoring
+         const isRootMatch = linkHost.includes(rootDomain) || rootDomain.includes(linkHost);
+         const isAts = atsDomains.some(d => linkHost.includes(d));
+         const titleMentionsCompany = title.toLowerCase().includes(rootDomain.split('.')[0]);
 
-       // Specific penalty for "Jobs at" if it's not on the main domain (likely a directory)
-       if (/^Jobs at /i.test(title) && !isRootMatch) {
-         score -= 20;
+         if (isRootMatch) score += 100;
+         else if (isAts) score += 80;
+         else if (titleMentionsCompany) score += 50;
+         else score += 10;
+         
+         if (/^Jobs at /i.test(title) && !isRootMatch) score -= 20;
+
+       } else {
+         // Open Search Scoring
+         // Prioritize ATS and clean job pages over generic aggregators
+         const isAts = atsDomains.some(d => linkHost.includes(d));
+         if (isAts) score += 80;
+         else score += 50; // Base score for open search results
        }
 
        return { link, score, valid: true };
