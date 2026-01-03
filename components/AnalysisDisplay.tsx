@@ -10,18 +10,19 @@ import {
   ResponsiveContainer, 
   Cell 
 } from 'recharts';
-import { BadgeCheck, Lightbulb, List, FileText, CheckCircle2, Search, ExternalLink } from 'lucide-react';
+import { BadgeCheck, Lightbulb, List, FileText, CheckCircle2, Search, ExternalLink, ArrowLeft } from 'lucide-react';
 import { JobSearch } from './JobSearch';
 
 interface AnalysisDisplayProps {
   result: AnalysisResult;
   resume: InputData;
   jobResults: JobSearchResult | null;
+  onBack: () => void;
 }
 
 const COLORS = ['#6366f1', '#ec4899', '#14b8a6', '#f59e0b', '#8b5cf6'];
 
-export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume, jobResults }) => {
+export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume, jobResults, onBack }) => {
   const technicalSkills = result.topSkills.filter(s => s.type === SkillType.TECHNICAL).sort((a, b) => b.score - a.score).slice(0, 8);
   const softSkills = result.topSkills.filter(s => s.type === SkillType.SOFT).sort((a, b) => b.score - a.score).slice(0, 6);
 
@@ -61,6 +62,17 @@ export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, resume
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
+      {/* Go Back Button */}
+      <div className="flex justify-start">
+        <button 
+          onClick={onBack}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-600 hover:text-indigo-600 bg-white border border-slate-200 rounded-xl transition-all hover:shadow-md active:scale-95"
+        >
+          <ArrowLeft size={18} />
+          Go Back to Editor
+        </button>
+      </div>
+
       {/* Header Summary */}
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
         <div className="flex items-center gap-3 mb-4 text-indigo-600">

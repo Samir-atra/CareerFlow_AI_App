@@ -4,10 +4,23 @@ import { AnalysisResult, SkillType, InputData, JobLink, ApplicationData } from '
 const getClient = () => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    throw new Error("API Key is missing. Please check your environment configuration.");
+    throw new Error("API Key is missing. Please check your environment configuration. (Hint: Select API Key in the UI if available).");
   }
   return new GoogleGenAI({ apiKey });
 };
+
+// Helper function to check for Gemini API errors
+const checkForGeminiError = (error: any): boolean => {
+  if (error && error.message && typeof error.message === 'string') {
+    return error.message.includes("RESOURCE_EXHAUSTED") || error.message.includes("429") || error.message.includes("API Key is missing");
+  }
+  // Also check if the error itself is a string containing the error message
+  if (typeof error === 'string') {
+    return error.includes("RESOURCE_EXHAUSTED") || error.includes("429") || error.includes("API Key is missing");
+  }
+  return false;
+};
+
 
 const analysisSchema: Schema = {
   type: Type.OBJECT,
@@ -113,6 +126,9 @@ export const analyzeDocuments = async (resume: InputData, coverLetter: InputData
 
     return JSON.parse(text) as AnalysisResult;
   } catch (error) {
+    if (checkForGeminiError(error)) {
+      throw new Error(`RESOURCE_EXHAUSTED: ${error.message || "Please check your API key and billing details."}`);
+    }
     console.error("Gemini Analysis Error:", error);
     throw error;
   }
@@ -299,15 +315,19 @@ export const findRelevantJobs = async (
     const seen = new Set<string>();
     
     for (const item of validLinks) {
+      // Fix: Access uri and title from item.link
       if (!seen.has(item.link.uri)) {
         seen.add(item.link.uri);
-        uniqueLinks.push(item.link);
+        uniqueLinks.push({ title: item.link.title, uri: item.link.uri });
       }
       if (uniqueLinks.length >= limit) break;
     }
 
     return { text, links: uniqueLinks };
   } catch (error) {
+    if (checkForGeminiError(error)) {
+      throw new Error(`RESOURCE_EXHAUSTED: ${error.message || "Please check your API key and billing details."}`);
+    }
     console.error("Job Search Error:", error);
     throw error;
   }
@@ -389,6 +409,9 @@ export const generateApplicationData = async (resume: InputData, jobTitle: strin
     if (!text) throw new Error("No response from Gemini");
     return JSON.parse(text) as ApplicationData;
   } catch (error) {
+    if (checkForGeminiError(error)) {
+      throw new Error(`RESOURCE_EXHAUSTED: ${error.message || "Please check your API key and billing details."}`);
+    }
     console.error("Application Gen Error:", error);
     throw error;
   }
