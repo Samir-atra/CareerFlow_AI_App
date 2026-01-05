@@ -14,4 +14,6 @@ export const PRESET_JOB_BOARDS = [
   "https://www.saxion.nl/over-saxion/werken-bij/en",
   "https://tue.varbi.com/",
   "https://careers.tudelft.nl/go/All-jobs/9021002/",
+  "https://www.lely.com/vacancies/",
+  "https://www.asml.com/en/careers/find-your-job?job_type=Fix",
 ];
