@@ -4,4 +4,9 @@ export const PRESET_JOB_BOARDS = [
   "https://jobs.apple.com/en-il/search?location=israel-ISR",
   "https://openai.com/careers/search/",
   "https://www.metacareers.com/jobsearch",
+  "https://careers.snap.com/jobs",
+  "https://lifeattiktok.com/search?recruitment_id_list=&job_category_id_list=&subject_id_list=&location_code_list=&keyword=&limit=12&offset=0",
+  "https://careers.adobe.com/us/en/c/research-jobs",
+  "https://www.mozilla.org/en-US/careers/listings/",
+  "https://x.ai/careers/open-roles",
 ];
