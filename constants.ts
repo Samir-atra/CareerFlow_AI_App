@@ -12,4 +12,6 @@ export const PRESET_JOB_BOARDS = [
   "https://www.han.nl/over-de-han/werken-bij-de-han/vacatures/#/",
   "https://www.hu.nl/werkenbij/vacatures",
   "https://www.saxion.nl/over-saxion/werken-bij/en",
+  "https://tue.varbi.com/",
+  "https://careers.tudelft.nl/go/All-jobs/9021002/",
 ];
