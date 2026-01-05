@@ -9,4 +9,7 @@ export const PRESET_JOB_BOARDS = [
   "https://careers.adobe.com/us/en/c/research-jobs",
   "https://www.mozilla.org/en-US/careers/listings/",
   "https://x.ai/careers/open-roles",
+  "https://www.han.nl/over-de-han/werken-bij-de-han/vacatures/#/",
+  "https://www.hu.nl/werkenbij/vacatures",
+  "https://www.saxion.nl/over-saxion/werken-bij/en",
 ];
