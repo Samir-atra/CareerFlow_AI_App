@@ -1,14 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { AnalysisDisplay } from './components/AnalysisDisplay';
 import { analyzeDocuments, findRelevantJobs } from './services/geminiService';
 import { AnalysisResult, AnalysisStatus, InputData, JobSearchResult, JobLink } from './types';
 import { Sparkles, ArrowRight, RefreshCw, AlertCircle, Search, Hash, Briefcase } from 'lucide-react';
 import { PRESET_JOB_BOARDS } from './constants';
-import { ApiKeyPromptModal } from './components/ApiKeyPromptModal';
-
-// Declare window.aistudio to avoid TypeScript errors
-// This block is removed as per coding guidelines, assuming window.aistudio is globally available.
 
 const App: React.FC = () => {
   // Document Inputs
@@ -25,42 +21,6 @@ const App: React.FC = () => {
   const [jobResults, setJobResults] = useState<JobSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // API Key Management State
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [apiKeyCheckDone, setApiKeyCheckDone] = useState(false);
-  const [isInitialApiKeyCheck, setIsInitialApiKeyCheck] = useState(false);
-
-  useEffect(() => {
-    const checkApiKey = async () => {
-      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-          setIsInitialApiKeyCheck(true);
-          setShowApiKeyModal(true);
-        }
-      }
-      setApiKeyCheckDone(true);
-    };
-    checkApiKey();
-  }, []);
-
-  const handleOpenSelectKey = async () => {
-    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-      try {
-        await window.aistudio.openSelectKey();
-        setShowApiKeyModal(false); // Assume user selected key, close modal
-        // After selecting, the environment variable API_KEY should be updated,
-        // so `getClient()` in services/geminiService.ts will pick up the new key on the next call.
-        // We don't need to re-run the previous failed action immediately, user can click Analyze again.
-      } catch (e) {
-        console.error("Failed to open API key selection dialog:", e);
-        setError("Failed to open API key selection. Please try again or check your environment.");
-      }
-    } else {
-      setError("API key selection mechanism not available in this environment.");
-    }
-  };
-
   const handleProcessAll = async () => {
     if (!resume.data || !coverLetter.data) {
       setError("Please provide both Resume and Cover Letter content.");
@@ -71,7 +31,6 @@ const App: React.FC = () => {
     setError(null);
     setAnalysisResult(null);
     setJobResults(null);
-    setShowApiKeyModal(false); // Hide any existing API key prompts
 
     try {
       // 1. Start Analysis
@@ -84,16 +43,7 @@ const App: React.FC = () => {
       // 2. Prepare Search Targets (Prioritized List)
       const tasks: { type: 'USER' | 'PRESET' | 'OPEN', url: string | null, priority: number, limit: number }[] = [];
 
-      // High Priority: User provided URL
-      if (targetUrl.trim()) {
-        let url = targetUrl.trim();
-        if (!url.startsWith('http')) {
-          url = 'https://' + url;
-        }
-        tasks.push({ type: 'USER', url, priority: 1, limit: jobCount });
-      }
-
-      // Medium Priority: Presets
+      // PRIORITY 1: Presets from constants.ts
       // Round-robin distribution of jobCount across presets
       const presetDistribution = new Map<string, number>();
       for (let i = 0; i < jobCount; i++) {
@@ -102,24 +52,31 @@ const App: React.FC = () => {
       }
       
       presetDistribution.forEach((limit, url) => {
-        // Avoid duplicate scanning if user entered a preset URL
-        if (tasks.find(t => t.url === url)) return;
-        tasks.push({ type: 'PRESET', url, priority: 2, limit });
+        tasks.push({ type: 'PRESET', url, priority: 1, limit });
       });
 
-      // Low Priority: Open Search (General web search for keywords)
+      // PRIORITY 2: User provided URL (if any)
+      if (targetUrl.trim()) {
+        let url = targetUrl.trim();
+        if (!url.startsWith('http')) {
+          url = 'https://' + url;
+        }
+        // Avoid duplicate scanning if user entered a preset URL manually
+        if (!tasks.find(t => t.url === url)) {
+          tasks.push({ type: 'USER', url, priority: 2, limit: jobCount });
+        }
+      }
+
+      // PRIORITY 3: Open Search (General web search for keywords)
       // Fallback: request the full jobCount to ensure we find something if presets yield nothing
       tasks.push({ type: 'OPEN', url: null, priority: 3, limit: jobCount });
 
       // 3. Run Search in Parallel
-      // We search all sources to ensure we can fill the requested quota with the best possible mix,
-      // respecting the priority order in the final sort.
       const searchPromises = tasks.map(task => 
         findRelevantJobs(analysis.keywords, task.url, task.limit)
           .then(res => ({ ...res, priority: task.priority }))
           .catch(err => {
             console.warn(`Search failed for ${task.url || 'Open Search'}:`, err);
-            // Re-throw if it's a quota error to be caught by the main handler
             if (err.message && err.message.includes("RESOURCE_EXHAUSTED")) {
               throw err; 
             }
@@ -130,11 +87,9 @@ const App: React.FC = () => {
       const results = await Promise.all(searchPromises);
 
       // 4. Aggregate & Prioritize Results
-      // Flatten the results and tag with priority
       const allLinks = results.flatMap(r => r.links.map(link => ({ ...link, priority: r.priority })));
       
       // Sort: Priority ascending (1 -> 2 -> 3)
-      // This ensures User URL links come first, then Presets, then Open Search.
       allLinks.sort((a, b) => a.priority - b.priority);
       
       // Deduplicate by URI
@@ -162,9 +117,7 @@ const App: React.FC = () => {
     } catch (err: any) {
       console.error(err);
       if (err.message && err.message.includes("RESOURCE_EXHAUSTED")) {
-        setIsInitialApiKeyCheck(false); // It's an error, not initial check
-        setShowApiKeyModal(true);
-        setError("API Quota Exceeded. Please select a billing-enabled API key.");
+        setError("API Quota Exceeded. Please check your project billing or try again later.");
       } else {
         setError(err.message || "An unexpected error occurred during processing.");
       }
@@ -177,9 +130,6 @@ const App: React.FC = () => {
     setJobResults(null);
     setStatus(AnalysisStatus.IDLE);
     setError(null);
-    setShowApiKeyModal(false);
-    // Note: We do NOT clear resume, coverLetter, targetUrl, or jobCount here.
-    // This allows the user to return to the editor with their data preserved.
   };
 
   return (
@@ -194,7 +144,7 @@ const App: React.FC = () => {
               </div>
               <span className="font-bold text-xl tracking-tight text-slate-900">CareerFlow AI</span>
             </div>
-            {(status === AnalysisStatus.SUCCESS || showApiKeyModal) && ( // Show reset even if modal is open for error
+            {status === AnalysisStatus.SUCCESS && (
               <div className="flex items-center">
                 <button 
                   onClick={handleProcessAll}
@@ -209,11 +159,8 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        
-        {/* Intro Header */}
-        {status === AnalysisStatus.IDLE && !showApiKeyModal && ( // Only show intro if no modal
+        {status === AnalysisStatus.IDLE && (
           <div className="text-center max-w-2xl mx-auto mb-12">
             <h1 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
               Your AI Career Copilot
@@ -224,11 +171,9 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Input Section - Only show when not viewing results and not showing API key modal */}
-        {status !== AnalysisStatus.SUCCESS && !showApiKeyModal && (
+        {status !== AnalysisStatus.SUCCESS && (
           <div className={`transition-all duration-500 max-w-5xl mx-auto ${status === AnalysisStatus.ANALYZING ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
             
-            {/* Step 1: Documents */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
               <div className="flex items-center gap-2 mb-6">
                 <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold">1</div>
@@ -250,7 +195,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Step 2: Job Search Parameters */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
               <div className="flex items-center gap-2 mb-6">
                 <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold">2</div>
@@ -339,7 +283,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Results Section */}
         {status === AnalysisStatus.SUCCESS && analysisResult && (
           <AnalysisDisplay 
             result={analysisResult} 
@@ -349,16 +292,6 @@ const App: React.FC = () => {
           />
         )}
       </main>
-
-      {/* API Key Prompt Modal */}
-      {apiKeyCheckDone && ( // Only render after initial check to avoid flash
-        <ApiKeyPromptModal 
-          isOpen={showApiKeyModal} 
-          onClose={() => setShowApiKeyModal(false)} 
-          onSelectKey={handleOpenSelectKey}
-          initialCheck={isInitialApiKeyCheck}
-        />
-      )}
     </div>
   );
 };
