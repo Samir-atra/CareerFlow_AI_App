@@ -1,5 +1,7 @@
 # CareerFlow AI 🚀
 
+Demo link: [https://youtu.be/XtXQVivgyXQ](https://youtu.be/XtXQVivgyXQ)
+
 **CareerFlow AI** is an intelligent, browser-based career assistant powered by Google's Gemini 3 Flash model. It streamlines the job application process by analyzing your credentials, finding relevant opportunities across major tech companies, and generating tailored application content instantly.
 
 ## 🌟 Key Features
