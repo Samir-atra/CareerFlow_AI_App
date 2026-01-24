@@ -4,7 +4,11 @@ import { AnalysisResult, SkillType, InputData, JobLink, ApplicationData } from '
 const getClient = () => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    throw new Error("API Key is missing. Please check your environment configuration. (Hint: Select API Key in the UI if available).");
+    throw new Error(
+      "Gemini API Key is missing. " +
+      "If running locally, ensure process.env.API_KEY is defined in your environment or .env file. " +
+      "If in AI Studio, ensure a key is selected or configured for the project."
+    );
   }
   return new GoogleGenAI({ apiKey });
 };
@@ -12,9 +16,9 @@ const getClient = () => {
 // Helper function to check for Gemini API errors
 const checkForGeminiError = (error: any): boolean => {
   if (error && error.message && typeof error.message === 'string') {
-    return error.message.includes("RESOURCE_EXHAUSTED") || error.message.includes("429") || error.message.includes("API Key is missing");
+    const msg = error.message;
+    return msg.includes("RESOURCE_EXHAUSTED") || msg.includes("429") || msg.includes("API Key is missing") || msg.includes("API_KEY_INVALID");
   }
-  // Also check if the error itself is a string containing the error message
   if (typeof error === 'string') {
     return error.includes("RESOURCE_EXHAUSTED") || error.includes("429") || error.includes("API Key is missing");
   }
@@ -77,9 +81,7 @@ export const analyzeDocuments = async (resume: InputData, coverLetter: InputData
     Please provide the output in strict JSON format matching the schema provided.
   `;
 
-  // Construct the contents with multimodal support
   const parts: any[] = [];
-
   parts.push({ text: "Here is the RESUME:" });
   
   if (resume.mimeType === 'application/pdf') {
@@ -90,7 +92,6 @@ export const analyzeDocuments = async (resume: InputData, coverLetter: InputData
       } 
     });
   } else {
-    // Treat as text (including parsed docx)
     parts.push({ text: resume.data.slice(0, 30000) });
   }
 
@@ -104,7 +105,6 @@ export const analyzeDocuments = async (resume: InputData, coverLetter: InputData
       } 
     });
   } else {
-    // Treat as text
     parts.push({ text: coverLetter.data.slice(0, 15000) });
   }
 
@@ -127,20 +127,17 @@ export const analyzeDocuments = async (resume: InputData, coverLetter: InputData
     return JSON.parse(text) as AnalysisResult;
   } catch (error) {
     if (checkForGeminiError(error)) {
-      throw new Error(`RESOURCE_EXHAUSTED: ${error.message || "Please check your API key and billing details."}`);
+      throw new Error(`API Error: ${error.message || "Quota exceeded or key invalid. Check billing/limits."}`);
     }
     console.error("Gemini Analysis Error:", error);
     throw error;
   }
 };
 
-// Helper to extract root domain (e.g., 'microsoft.com' from 'apply.careers.microsoft.com')
 const getRootDomain = (url: string): string => {
   try {
     const hostname = new URL(url.startsWith('http') ? url : `https://${url}`).hostname;
     const parts = hostname.split('.');
-    // Simple heuristic: if > 2 parts, take last 2. 
-    // Works for microsoft.com, apple.com, google.com, x.ai (2 parts)
     if (parts.length > 2) {
       return parts.slice(-2).join('.');
     }
@@ -156,8 +153,6 @@ export const findRelevantJobs = async (
   limit: number = 3
 ): Promise<{ text: string, links: JobLink[] }> => {
   const ai = getClient();
-  
-  // Broaden keywords for search query - use OR to maximize recall
   const searchKeywords = keywords.slice(0, 5).map(k => `"${k}"`).join(" OR ");
   
   let prompt = "";
@@ -165,46 +160,24 @@ export const findRelevantJobs = async (
 
   if (targetUrl) {
     rootDomain = getRootDomain(targetUrl);
-    // Targeted Search Prompt
     prompt = `
       User Target Collection URL: "${targetUrl}"
       Target Root Domain: "${rootDomain}"
       Candidate Keywords: ${searchKeywords}
 
       **OBJECTIVE**: Find exactly ${limit} distinct "Leaf Page" job postings for the company "${rootDomain}".
-
-      **STRATEGY (Priority Order)**:
-      1. **Primary**: Search specifically for job pages on "site:${rootDomain}" or common ATS platforms (Greenhouse, Lever, etc).
-      2. **Fallback**: If finding sufficient specific pages on the official site is difficult, expand the search to find **ANY** valid job posting for "${rootDomain}" on reputable third-party sites (LinkedIn, Indeed, etc.).
-      3. **Guarantee**: You must attempt to return ${limit} results.
-
-      **LEAF PAGE DEFINITION**:
-      - A page describing a single specific role.
-      - URL often contains: /job/, /careers/details/, /position/, /req/, or a numeric ID.
-      - Examples: 
-        - "jobs.apple.com/en-us/details/200..." (Leaf) vs "jobs.apple.com/en-us/search" (Collection)
-        - "google.com/about/careers/.../results/123" (Leaf) vs ".../results" (Collection)
-        - "boards.greenhouse.io/xai/jobs/123" (Leaf)
-
-      **OUTPUT**:
-      - Return Google Search grounding metadata for these leaf pages.
+      **STRATEGY**:
+      1. Search specifically for job pages on "site:${rootDomain}".
+      2. If results are low, expand to third-party sites (LinkedIn, Indeed).
+      3. Focus on pages describing a single role (/job/, /career/details/, etc).
+      **OUTPUT**: Return Google Search grounding metadata.
     `;
   } else {
-    // Open Search Prompt
     prompt = `
       Candidate Keywords: ${searchKeywords}
-
       **OBJECTIVE**: Find ${limit} distinct "Leaf Page" job postings that match the candidate keywords.
-      
-      **STRATEGY**:
-      - Search broadly across major job boards (LinkedIn, Indeed, Glassdoor, etc.) and company career pages.
-      - Prioritize recent and relevant listings suitable for a professional candidate.
-      
-      **LEAF PAGE DEFINITION**:
-      - A page describing a single specific role.
-      
-      **OUTPUT**:
-      - Return Google Search grounding metadata for these leaf pages.
+      **STRATEGY**: Search broadly across major boards (LinkedIn, Indeed) and career pages.
+      **OUTPUT**: Return Google Search grounding metadata.
     `;
   }
 
@@ -218,8 +191,6 @@ export const findRelevantJobs = async (
     });
 
     const text = response.text || "Search completed.";
-    
-    // Extract grounding chunks
     const links: JobLink[] = [];
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     
@@ -232,101 +203,59 @@ export const findRelevantJobs = async (
       }
     });
 
-    // Flexible filtering logic
-    const badTitlePatterns = [
-      /not found/i,
-      /error/i,
-      /404/i,
-      /job closed/i,
-      /closed job/i,
-      /no longer available/i,
-      /login/i,
-      /sign in/i,
-      /search results/i, // "Search Results" is almost always a collection
-    ];
-
-    const atsDomains = [
-      'greenhouse.io', 'lever.co', 'workday', 'ashby', 'smartrecruiters', 
-      'icims', 'jobvite', 'taleo', 'bamboohr', 'recruitee', 'workable'
-    ];
-
-    // Helper to normalize URLs
+    const badTitlePatterns = [/not found/i, /error/i, /404/i, /job closed/i, /search results/i];
+    const atsDomains = ['greenhouse.io', 'lever.co', 'workday', 'ashby', 'smartrecruiters', 'taleo'];
     const normalize = (u: string) => u.toLowerCase().replace(/\/$/, '').replace(/^https?:\/\/(www\.)?/, '');
     const normalizedTarget = targetUrl ? normalize(targetUrl) : "";
 
-    // Filter AND Score links
     const scoredLinks = links.map(link => {
        const linkUrlStr = link.uri;
        let linkUrl: URL;
-       try {
-         linkUrl = new URL(linkUrlStr);
-       } catch {
-         return { link, score: -1, valid: false };
-       }
+       try { linkUrl = new URL(linkUrlStr); } catch { return { link, score: -1, valid: false }; }
 
        const title = link.title.trim();
-       
-       // 1. Basic Validity Checks
        if (badTitlePatterns.some(pattern => pattern.test(title))) {
           if (title.toLowerCase().includes('search results')) return { link, score: -1, valid: false };
        }
 
-       // Collection Page Loop Prevention (Only if targetUrl is set)
        if (targetUrl) {
          const normalizedLink = normalize(linkUrlStr);
          if (normalizedLink === normalizedTarget) return { link, score: -1, valid: false };
-         if (normalizedLink.startsWith(normalizedTarget) && normalizedLink.length < normalizedTarget.length + 5) {
-           return { link, score: -1, valid: false };
-         }
        }
 
-       // 2. Scoring
        let score = 0;
        const linkHost = linkUrl.hostname;
 
        if (targetUrl) {
-         // Targeted Search Scoring
-         const isRootMatch = linkHost.includes(rootDomain) || rootDomain.includes(linkHost);
+         const isRootMatch = linkHost.includes(rootDomain);
          const isAts = atsDomains.some(d => linkHost.includes(d));
-         const titleMentionsCompany = title.toLowerCase().includes(rootDomain.split('.')[0]);
-
          if (isRootMatch) score += 100;
          else if (isAts) score += 80;
-         else if (titleMentionsCompany) score += 50;
          else score += 10;
-         
-         if (/^Jobs at /i.test(title) && !isRootMatch) score -= 20;
-
        } else {
-         // Open Search Scoring
-         // Prioritize ATS and clean job pages over generic aggregators
          const isAts = atsDomains.some(d => linkHost.includes(d));
-         if (isAts) score += 80;
-         else score += 50; // Base score for open search results
+         score = isAts ? 80 : 50;
        }
 
        return { link, score, valid: true };
     });
 
-    // Filter invalid, Sort by Score, Deduplicate
-    const validLinks = scoredLinks.filter(item => item.valid).sort((a, b) => b.score - a.score);
-    
     const uniqueLinks: JobLink[] = [];
     const seen = new Set<string>();
-    
-    for (const item of validLinks) {
-      // Fix: Access uri and title from item.link
-      if (!seen.has(item.link.uri)) {
-        seen.add(item.link.uri);
-        uniqueLinks.push({ title: item.link.title, uri: item.link.uri });
-      }
-      if (uniqueLinks.length >= limit) break;
-    }
+    scoredLinks
+      .filter(item => item.valid)
+      .sort((a, b) => b.score - a.score)
+      .forEach(item => {
+        if (!seen.has(item.link.uri) && uniqueLinks.length < limit) {
+          seen.add(item.link.uri);
+          uniqueLinks.push({ title: item.link.title, uri: item.link.uri });
+        }
+      });
 
     return { text, links: uniqueLinks };
   } catch (error) {
     if (checkForGeminiError(error)) {
-      throw new Error(`RESOURCE_EXHAUSTED: ${error.message || "Please check your API key and billing details."}`);
+      throw new Error(`Search Error: ${error.message || "Quota/Billing error during search."}`);
     }
     console.error("Job Search Error:", error);
     throw error;
@@ -357,37 +286,21 @@ const applicationSchema: Schema = {
       },
       required: ["coverLetter", "whyThisRole", "relevantExperience", "salaryExpectation"]
     },
-    applyUrl: { type: Type.STRING, description: "The direct URL to the application form page, if distinct from the job description page." }
+    applyUrl: { type: Type.STRING, description: "The direct URL to the application form page." }
   },
   required: ["personalInfo", "responses"]
 };
 
 export const generateApplicationData = async (resume: InputData, jobTitle: string, jobUri: string): Promise<ApplicationData> => {
   const ai = getClient();
-
-  // Updated prompt to ensure it treats the input as a specific job
   const prompt = `
-    Task: Prepare job application content for a specific position.
-    
-    Target Job: "${jobTitle}"
-    Target URL: ${jobUri}
-    
-    1. **Research**: Use Google Search to analyze the specific job description at the provided URL. Understand the key requirements, company culture, and role responsibilities.
-       - IMPORTANT: Also try to identify if there is a distinct "Apply" URL (a page with a form) that is different from the description page. If found, include it in the 'applyUrl' field.
-    2. **Analyze Candidate**: Review the Candidate's Resume provided below.
-    3. **Extract Info**: Get Candidate's Personal Info.
-    4. **Draft Content**: 
-       - Write a specific, passionate Cover Letter connecting the candidate's past projects to this specific role's requirements.
-       - Answer "Why do you want this job?" using specific details found in the job description.
-       - Summarize "Relevant Experience" by cherry-picking resume items that match the job description.
-    
-    Output must be valid JSON matching the schema.
+    Prepare job application content for: "${jobTitle}" at ${jobUri}.
+    Analyze the job requirements and match against the candidate's resume below.
+    Generate a tailored cover letter, role motivations, and experience summary.
+    Output must be JSON.
   `;
 
-  const parts: any[] = [];
-  parts.push({ text: prompt });
-  parts.push({ text: "\n\nCANDIDATE RESUME:" });
-  
+  const parts: any[] = [{ text: prompt }, { text: "\n\nCANDIDATE RESUME:" }];
   if (resume.mimeType === 'application/pdf') {
     parts.push({ inlineData: { mimeType: resume.mimeType, data: resume.data } });
   } else {
@@ -410,7 +323,7 @@ export const generateApplicationData = async (resume: InputData, jobTitle: strin
     return JSON.parse(text) as ApplicationData;
   } catch (error) {
     if (checkForGeminiError(error)) {
-      throw new Error(`RESOURCE_EXHAUSTED: ${error.message || "Please check your API key and billing details."}`);
+      throw new Error(`Drafting Error: ${error.message || "Quota/Billing error during content generation."}`);
     }
     console.error("Application Gen Error:", error);
     throw error;
